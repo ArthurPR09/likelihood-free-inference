@@ -3,29 +3,35 @@ from scipy import stats
 
 
 class MAProcess:
-    def __init__(self, *theta):
+    def __init__(self, *theta, length=100):
         self.q = len(theta)
         self.theta = list(theta)
+        self.length = length
 
-    def rvs(self, size):
-        u = np.random.normal(0, 1, size+self.q)
-        z = [u[i+self.q] + sum(u[i:i+self.q-1] * self.theta) for i in range(size)]
+    def rvs(self, size=None):
+        if size == None:
+            u = np.random.normal(0, 1, self.length+self.q)
+            z = np.array([u[i+self.q] + sum(u[i:i+self.q-1] * self.theta) for i in range(self.length)])
+        else:
+            u = np.random.normal(0, 1, (size, self.length+self.q))
+            z = np.array([[u[j, i+self.q] + sum(u[j, i:i+self.q-1] * self.theta) for i in range(self.length)]
+                          for j in range(size)])
         return z
 
 
 class Theta1Prior(stats.rv_continuous):
     def _pdf(self, theta1):
-        return (2 - np.abs(theta1)) / 4 if -2 < theta1 and theta1 < 2 else 0
+        return (2 - np.abs(theta1)) / 4
 
 
 class MA2Prior:
     def __init__(self):
-        self.theta1prior = Theta1Prior()
+        self.theta1prior = Theta1Prior(a=-2, b=2, name="theta1prior")
 
     def rvs(self, size=None):
         theta1 = self.theta1prior.rvs(size=size)
-        theta2 = stats.uniform.rvs(np.abs(theta1), 2-np.abs(theta1), size=size)
-        return np.c[theta1, theta2] if size != None else [theta1, theta2]
+        theta2 = stats.uniform.rvs(np.abs(theta1)-1, 2-np.abs(theta1), size=size)
+        return np.c_[theta1, theta2] if size != None else theta1, theta2
 
     def cdf(self, theta1, theta2):
         return 1/4
