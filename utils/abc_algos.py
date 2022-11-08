@@ -9,28 +9,26 @@ def samples_dist(sample1, sample2, sumstat=None):
         return np.linalg.norm(sample1 - sample2)
 
 
-def rejection_sampler(data, prior, likelihood, N, eps):
+def rejection_sampler(data, prior, likelihood, N, eps, sumstat=None):
     theta_sample = np.empty(N)
     for i in range(N):
         dist = eps + 1
         while dist > eps:
             theta_sim = prior.rvs(size=None)
-            likelihood.params = theta_sim
-            data_sim = likelihood.rvs(size=len(data))
-            dist = samples_dist(data, data_sim)
+            data_sim = likelihood(*theta_sim).rvs(size=len(data))
+            dist = samples_dist(data, data_sim, sumstat=sumstat)
         theta_sample[i] = theta_sim
     return theta_sample
 
 
-def rejection_sampler_qt(data, prior, likelihood, N, qt):
-    theta_sample = np.empty(N)
+def rejection_sampler_qt(data, prior, likelihood, N, qt, dim_prior=1, sumstat=None):
+    theta_sample = np.empty(N) if dim_prior == 1 else np.empty((N, dim_prior))
     dist = np.empty(N)
     for i in range(N):
         theta_sample[i] = prior.rvs(size=None)
         data_sim = likelihood(*theta_sample[i]).rvs(size=len(data))
-        dist[i] = samples_dist(data, data_sim)
-    theta_sample = [theta for i, theta in enumerate(theta_sample)
-                    if dist[i] < np.quantile(dist, qt)]
+        dist[i] = samples_dist(data, data_sim, sumstat)
+    theta_sample = np.array([theta for i, theta in enumerate(theta_sample) if dist[i] < np.quantile(dist, qt)])
     return theta_sample
 
 
