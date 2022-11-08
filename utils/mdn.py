@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import Sequential, Linear, Tanh, Softmax
@@ -18,7 +19,7 @@ class MDN(nn.Module):
             Softmax(dim=0)
         )
         self.mu_layer = Linear(n_hidden, n_gaussians * gaussian_dim)
-        self.sigma_layer = Linear(n_hidden, n_gaussians * gaussian_dim ** 2)
+        self.sigma_layer = Linear(n_hidden, n_gaussians * gaussian_dim * (gaussian_dim + 1) / 2)
 
 
     def mog_cdf(self, y, pi, mu, sigma):
@@ -31,7 +32,27 @@ class MDN(nn.Module):
         return prob
 
 
-    def forward(self, x, y):
+    def format_sigma(self, sigma_values):
+        sigma = torch.zeros((self.gaussian_dim, self.gaussian_dim))
+        tri_ids = torch.triu_indices(*sigma.shape, offset=0).tolist()
+        sigma[tri_ids] = sigma_values
+
+        variances = torch.diag(torch.exp(torch.diag(sigma)))
+        mask = torch.diag(torch.ones_like(variances))
+        sigma = sigma - mask * sigma + variances
+
+        upper_ids = torch.triu_indices(*sigma.shape, offset=1).tolist()
+        lower_ids = torch.tril_indices(*sigma.shape, offset=-1).tolist()
+        covariances = torch.tanh(sigma[upper_ids])
+        for k, (i, j) in enumerate(upper_ids):
+            covariances[k] = covariances[k] * torch.sqrt(sigma[i, i] * sigma[j, j])
+        sigma[upper_ids] = covariances
+        sigma[lower_ids] = sigma[upper_ids]
+
+        return sigma
+
+
+    def forward(self, x):
         features = self.hidden_layer(x)
         pi = self.pi_layer(features)
         mu = self.mu_layer(features)
@@ -41,13 +62,15 @@ class MDN(nn.Module):
             sigma = torch.exp(sigma)
         else:
             mu = mu.reshape((self.n_gaussians, self.gaussian_dim))
-            sigma = sigma.reshape((self.n_gaussians, self.gaussian_dim ** 2))
+            sigma = sigma.reshape((self.n_gaussians, self.gaussian_dim * (self.gaussian_dim + 1) / 2))
+            sigma = self.format_sigma(sigma)
+
             assert all(torch.linalg.det(sigma) != 0), "Not all sigmas are invertible"
 
-        probs = self.mog_cdf(y, pi, mu, sigma)
-        return probs
+        return pi, mu, sigma
 
 
-    def mdn_loss(self, probs):
-        nll = -torch.log(torch.sum(probs, dim=1))
-        return torch.mean(nll)
+def mdn_loss(model, y, pi, mu, sigma):
+    probs = model.mog_cdf(y, pi, mu, sigma)
+    nll = -torch.log(torch.sum(probs, dim=1))
+    return torch.mean(nll)
